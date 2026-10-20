@@ -2561,7 +2561,7 @@ window._cfgOut = null;     // 產出的設定檔 + checklist
 //       / scripts/Validate-QueryToolImport.ps1
 // 連線快照會過期：清單裡沒有 ≠ 一定不存在，一律標 TODO_ 交工程師確認。
 // 版本戳：GitHub Pages 會快取 10 分鐘，畫面上看得到版本才分得出「是不是還在用舊頁」
-const APP_BUILD = '2026-10-20a';
+const APP_BUILD = '2026-10-20b';
 const CFG_PACK_VERSION = 'query-tool-config-generator（內建）';
 // skill 包 2026-10-12 快照 86 個 ＋ 2026-10-14 dev 精靈連線清單多出的 8 個（CFG_CONN_DEV_RUNTIME_ONLY）
 const CFG_SNAPSHOT_DATE = '2026-10-14';
@@ -3691,23 +3691,6 @@ function runConfigGeneration() {
     }
   }
 
-  // wizard 為單一物件；import 為陣列
-  let payload;
-  if (wizard) {
-    // wizard 端點吃單一物件，不是陣列 → 一次只能建一個工具。
-    // 不寫 MenuParentNo：不知道編號時寫 0 會被當成根節點（精靈「貼上JSON」看到數字就會依它帶入路徑），
-    // 選單位置改在精靈裡填路徑，存檔時系統會逐段比對、自動建資料夾
-    const one = wizardItem(items[0]);
-    payload = one;
-    if (items.length > 1) {
-      warns.push(`wizard 格式一次只能建立一個工具，本次只會輸出「${items[0].ToolName}」，`
-        + `其餘 ${items.length - 1} 個（${items.slice(1).map(i => i.ToolName).join('、')}）不會在檔案裡`
-        + '——要一次全部建立請改用 import 格式');
-    }
-  } else {
-    payload = items;
-  }
-
   // 精靈的工具名稱＝選單節點名稱。同一份規格書的兩個頁籤（VIP返利 頁籤1／頁籤2）路徑最後一段相同，
   // 照填會在同一個資料夾建出兩個同名工具 → 同名時接上各自的頁籤名稱
   const menus = built.map(b => Object.assign({}, b.wizardMenu));
@@ -3722,6 +3705,24 @@ function runConfigGeneration() {
   built.forEach((b, i) => { const o = b.wizardMenu.leaf; if (o && menus[i].leaf !== o) (renamedAll[o] = renamedAll[o] || []).push(menus[i].leaf); });
   const fixLeafTodo = t => Object.keys(renamedAll).reduce((s, o) =>
     s.split('「工具名稱」填 <b>' + escapeHtml(o) + '</b>').join('「工具名稱」分別填 <b>' + renamedAll[o].map(escapeHtml).join('</b>／<b>') + '</b>'), t);
+
+  // wizard 為單一物件；import 為陣列
+  let payload;
+  if (wizard) {
+    // wizard 端點吃單一物件，不是陣列 → 一次只能建一個工具。
+    // 不寫 MenuParentNo：不知道編號時寫 0 會被當成根節點（精靈「貼上JSON」看到數字就會依它帶入路徑），
+    // 選單位置改在精靈裡填路徑，存檔時系統會逐段比對、自動建資料夾；跟複製按鈕一樣帶 MenuPath
+    payload = wizardItem(items[0], menus[0]);
+    if (items.length > 1) {
+      warns.push(`wizard 格式一次只能建立一個工具，本次只會輸出「${items[0].ToolName}」，`
+        + `其餘 ${items.length - 1} 個（${items.slice(1).map(i => i.ToolName).join('、')}）不會在檔案裡`
+        + '——要一次全部建立請改用 import 格式');
+    }
+  } else {
+    // 匯入 API 只吃數字 MenuNo；規格書的選單路徑以 MenuPath 一併帶上（緊接在 MenuNo 後），
+    // 讓拿到檔案的人看得到工具要放哪。匯入端點與驗證腳本都不檢查多出來的欄位，後端解析也會忽略。
+    payload = items.map((it, i) => withMenuPath(it, (menus[i] || {}).folder));
+  }
 
   window._cfgOut = {
     payload, items, wizard, blocked,
@@ -3801,6 +3802,14 @@ function cfgBaseName() {
 // menu（選填）＝ splitMenuPath 的結果：
 // - 工具名稱就是選單節點名稱（現有「超級王牌」也是），所以有選單最後一段就用它當 ToolName，貼上後不用再改
 // - MenuPath 帶資料夾路徑：精靈目前會忽略（只認數字 MenuParentNo），已請前端支援讀它自動帶入選單位置
+// 在 MenuNo 後面插入 MenuPath（保持欄位順序好讀）；沒有路徑就原樣回傳
+function withMenuPath(it, path) {
+  if (!path) return it;
+  const out = {};
+  Object.keys(it).forEach(k => { out[k] = it[k]; if (k === 'MenuNo') out.MenuPath = path; });
+  if (!('MenuPath' in out)) out.MenuPath = path;
+  return out;
+}
 function wizardItem(it, menu) {
   const one = Object.assign({}, it);
   delete one.IndexNo; delete one.InvalidFlag; delete one.MenuNo; delete one.MenuParentNo;
