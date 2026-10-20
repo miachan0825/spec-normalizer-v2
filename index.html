@@ -2561,7 +2561,7 @@ window._cfgOut = null;     // 產出的設定檔 + checklist
 //       / scripts/Validate-QueryToolImport.ps1
 // 連線快照會過期：清單裡沒有 ≠ 一定不存在，一律標 TODO_ 交工程師確認。
 // 版本戳：GitHub Pages 會快取 10 分鐘，畫面上看得到版本才分得出「是不是還在用舊頁」
-const APP_BUILD = '2026-10-20b';
+const APP_BUILD = '2026-10-20c';
 const CFG_PACK_VERSION = 'query-tool-config-generator（內建）';
 // skill 包 2026-10-12 快照 86 個 ＋ 2026-10-14 dev 精靈連線清單多出的 8 個（CFG_CONN_DEV_RUNTIME_ONLY）
 const CFG_SNAPSHOT_DATE = '2026-10-14';
@@ -3024,7 +3024,7 @@ function buildQueryToolConfig(state, tool) {
     todos.push(`<b>選單位置</b>：建議用後台「新增自動化工具」精靈建立——按「📋 複製（貼到精靈）」→ 精靈「貼上JSON快速填入」`
       + (wizardMenu.leaf ? `（「工具名稱」填 <b>${escapeHtml(wizardMenu.leaf)}</b>，已帶在複製的 JSON 裡，是規格書選單路徑的最後一段）` : '')
       + `，再按「📋 複製選單路徑」貼進精靈的「選單位置」：<b>${escapeHtml(wizardMenu.folder)}</b>。`
-      + '精靈目前不會從 JSON 帶入選單位置（只認數字資料夾編號），已請前端支援。已存在的資料夾會沿用、缺的會自動建立，不需要節點編號；只有改用匯入檔（import）時，才要請工程師換成數字 <code>MenuNo</code>');
+      + '後台的選單欄位只吃數字編號（規格書只有路徑），所以 JSON 裡沒有選單位置，要在精靈手動貼上。已存在的資料夾會沿用、缺的會自動建立，不需要節點編號；只有改用匯入檔（import）時，才要請工程師換成數字 <code>MenuNo</code>');
     rows.push(['選單位置', escapeHtml(wizardMenu.folder) + (wizardMenu.leaf ? '（工具名稱：' + escapeHtml(wizardMenu.leaf) + '）' : ''),
       'ok', '精靈直接填路徑即可']);
   } else {
@@ -3711,7 +3711,7 @@ function runConfigGeneration() {
   if (wizard) {
     // wizard 端點吃單一物件，不是陣列 → 一次只能建一個工具。
     // 不寫 MenuParentNo：不知道編號時寫 0 會被當成根節點（精靈「貼上JSON」看到數字就會依它帶入路徑），
-    // 選單位置改在精靈裡填路徑，存檔時系統會逐段比對、自動建資料夾；跟複製按鈕一樣帶 MenuPath
+    // 選單位置改在精靈裡填路徑，存檔時系統會逐段比對、自動建資料夾；工具名稱跟複製按鈕一樣用選單最後一段
     payload = wizardItem(items[0], menus[0]);
     if (items.length > 1) {
       warns.push(`wizard 格式一次只能建立一個工具，本次只會輸出「${items[0].ToolName}」，`
@@ -3719,9 +3719,9 @@ function runConfigGeneration() {
         + '——要一次全部建立請改用 import 格式');
     }
   } else {
-    // 匯入 API 只吃數字 MenuNo；規格書的選單路徑以 MenuPath 一併帶上（緊接在 MenuNo 後），
-    // 讓拿到檔案的人看得到工具要放哪。匯入端點與驗證腳本都不檢查多出來的欄位，後端解析也會忽略。
-    payload = items.map((it, i) => withMenuPath(it, (menus[i] || {}).folder));
+    // 匯入 API 只吃數字 MenuNo。不要另外塞 MenuPath 之類的路徑欄位：後台沒有對應欄位、會被忽略，
+    // 放了反而讓人以為選單有帶進去（2026-10-20 使用者指出）。路徑寫在檢查清單與面板
+    payload = items;
   }
 
   window._cfgOut = {
@@ -3799,22 +3799,13 @@ function cfgBaseName() {
 }
 // 精靈「貼上JSON快速填入」吃的格式：單一物件（不是陣列）、必須有 ToolName；
 // 不讀選單路徑文字，MenuParentNo 是數字才會用（2026-10-14 讀 dev 後台前端程式確認）
-// menu（選填）＝ splitMenuPath 的結果：
-// - 工具名稱就是選單節點名稱（現有「超級王牌」也是），所以有選單最後一段就用它當 ToolName，貼上後不用再改
-// - MenuPath 帶資料夾路徑：精靈目前會忽略（只認數字 MenuParentNo），已請前端支援讀它自動帶入選單位置
-// 在 MenuNo 後面插入 MenuPath（保持欄位順序好讀）；沒有路徑就原樣回傳
-function withMenuPath(it, path) {
-  if (!path) return it;
-  const out = {};
-  Object.keys(it).forEach(k => { out[k] = it[k]; if (k === 'MenuNo') out.MenuPath = path; });
-  if (!('MenuPath' in out)) out.MenuPath = path;
-  return out;
-}
+// menu（選填）＝ splitMenuPath 的結果：工具名稱就是選單節點名稱（現有「超級王牌」也是），
+// 所以有選單最後一段就用它當 ToolName，貼上後不用再改。
+// 選單位置後台只認數字（MenuParentNo），規格書只有路徑文字，所以不放進 JSON；用「📋 複製選單路徑」貼
 function wizardItem(it, menu) {
   const one = Object.assign({}, it);
   delete one.IndexNo; delete one.InvalidFlag; delete one.MenuNo; delete one.MenuParentNo;
   if (menu && menu.leaf) one.ToolName = menu.leaf;
-  if (menu && menu.folder) one.MenuPath = menu.folder;
   return one;
 }
 function copyWizardJson(i) {
