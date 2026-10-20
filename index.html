@@ -594,6 +594,7 @@ body {
 }
 .mn-copy:hover { filter: brightness(1.08); }
 .mn-copy:disabled { opacity: 0.45; cursor: not-allowed; }
+.mn-copy2 { background: var(--bg); color: var(--accent); border: 1px solid var(--accent); }
 .cp-sub-inline { font-weight: 400; font-size: 0.73rem; color: var(--text2); margin-left: 6px; }
 .cfg-picker .cp-sub { font-size: 0.73rem; color: var(--text2); margin-bottom: 9px; line-height: 1.55; }
 .cp-row {
@@ -2560,7 +2561,7 @@ window._cfgOut = null;     // 產出的設定檔 + checklist
 //       / scripts/Validate-QueryToolImport.ps1
 // 連線快照會過期：清單裡沒有 ≠ 一定不存在，一律標 TODO_ 交工程師確認。
 // 版本戳：GitHub Pages 會快取 10 分鐘，畫面上看得到版本才分得出「是不是還在用舊頁」
-const APP_BUILD = '2026-10-14m';
+const APP_BUILD = '2026-10-20a';
 const CFG_PACK_VERSION = 'query-tool-config-generator（內建）';
 // skill 包 2026-10-12 快照 86 個 ＋ 2026-10-14 dev 精靈連線清單多出的 8 個（CFG_CONN_DEV_RUNTIME_ONLY）
 const CFG_SNAPSHOT_DATE = '2026-10-14';
@@ -3019,10 +3020,11 @@ function buildQueryToolConfig(state, tool) {
   } else if (menuPath) {
     // 精靈存檔時逐段比對路徑、缺的資料夾自動建立，不需要節點編號（2026-10-14 dev 精靈確認）；
     // 只有走 import 匯入檔才需要數字 MenuNo
-    todos.push(`<b>選單位置</b>：建議用後台「新增自動化工具」精靈建立——按「📋 複製（貼到精靈）」→ 精靈「貼上JSON快速填入」，`
-      + `再在「選單位置」填 <b>${escapeHtml(wizardMenu.folder)}</b>`
-      + (wizardMenu.leaf ? `、「工具名稱」填 <b>${escapeHtml(wizardMenu.leaf)}</b>（規格書路徑的最後一段是工具在選單上的名稱）` : '')
-      + '。已存在的資料夾會沿用、缺的會自動建立，不需要節點編號。只有改用匯入檔（import）時，才要請工程師換成數字 <code>MenuNo</code>');
+    // 「「工具名稱」填 <b>…</b>」這段字被 runConfigGeneration 的同名改名（fixLeafTodo）比對，改字時要保留
+    todos.push(`<b>選單位置</b>：建議用後台「新增自動化工具」精靈建立——按「📋 複製（貼到精靈）」→ 精靈「貼上JSON快速填入」`
+      + (wizardMenu.leaf ? `（「工具名稱」填 <b>${escapeHtml(wizardMenu.leaf)}</b>，已帶在複製的 JSON 裡，是規格書選單路徑的最後一段）` : '')
+      + `，再按「📋 複製選單路徑」貼進精靈的「選單位置」：<b>${escapeHtml(wizardMenu.folder)}</b>。`
+      + '精靈目前不會從 JSON 帶入選單位置（只認數字資料夾編號），已請前端支援。已存在的資料夾會沿用、缺的會自動建立，不需要節點編號；只有改用匯入檔（import）時，才要請工程師換成數字 <code>MenuNo</code>');
     rows.push(['選單位置', escapeHtml(wizardMenu.folder) + (wizardMenu.leaf ? '（工具名稱：' + escapeHtml(wizardMenu.leaf) + '）' : ''),
       'ok', '精靈直接填路徑即可']);
   } else {
@@ -3500,9 +3502,11 @@ function renderMenuEditor(pickedTools, state) {
         <div class="mn-row">
           <span class="mn-name"></span>
           <span class="mn-wiz">精靈填：選單位置「<b>${escapeHtml(wm.folder || '（規格書未寫）')}</b>」${wm.leaf
-            ? `、工具名稱「<b>${escapeHtml(wm.leaf)}</b>」` : ''}</span>
+            ? `、工具名稱「<b>${escapeHtml(wm.leaf)}</b>」（已帶進複製的 JSON）` : ''}</span>
           <button type="button" class="mn-copy" ${idx < 0 ? 'disabled title="這支工具被擋下，沒有寫進設定檔"' : ''}
                   onclick="copyWizardJson(${idx})">📋 複製（貼到精靈）</button>
+          <button type="button" class="mn-copy mn-copy2" ${idx < 0 || !wm.folder ? 'disabled' : ''}
+                  onclick="copyMenuPath(${idx})">📋 複製選單路徑</button>
         </div>`;
       }).join('');
 }
@@ -3794,9 +3798,14 @@ function cfgBaseName() {
 }
 // 精靈「貼上JSON快速填入」吃的格式：單一物件（不是陣列）、必須有 ToolName；
 // 不讀選單路徑文字，MenuParentNo 是數字才會用（2026-10-14 讀 dev 後台前端程式確認）
-function wizardItem(it) {
+// menu（選填）＝ splitMenuPath 的結果：
+// - 工具名稱就是選單節點名稱（現有「超級王牌」也是），所以有選單最後一段就用它當 ToolName，貼上後不用再改
+// - MenuPath 帶資料夾路徑：精靈目前會忽略（只認數字 MenuParentNo），已請前端支援讀它自動帶入選單位置
+function wizardItem(it, menu) {
   const one = Object.assign({}, it);
   delete one.IndexNo; delete one.InvalidFlag; delete one.MenuNo; delete one.MenuParentNo;
+  if (menu && menu.leaf) one.ToolName = menu.leaf;
+  if (menu && menu.folder) one.MenuPath = menu.folder;
   return one;
 }
 function copyWizardJson(i) {
@@ -3804,10 +3813,18 @@ function copyWizardJson(i) {
   const it = o && o.items[i];
   if (!it) { showError('這支工具沒有寫進設定檔（可能被擋下），無法複製'); return; }
   const m = (o.menus || [])[i] || {};
-  navigator.clipboard.writeText(JSON.stringify(wizardItem(it), null, 2)).then(() => {
-    showToast('📋 已複製「' + it.ToolName + '」——到精靈按「貼上JSON快速填入」貼上'
-      + (m.folder ? '，選單位置填：' + m.folder : '') + (m.leaf ? '，工具名稱填：' + m.leaf : ''));
+  const one = wizardItem(it, m);
+  navigator.clipboard.writeText(JSON.stringify(one, null, 2)).then(() => {
+    showToast('📋 已複製「' + one.ToolName + '」——到精靈按「貼上JSON快速填入」貼上'
+      + (m.folder ? '；選單位置再按「📋 複製選單路徑」貼上' : ''));
   }, () => showError('複製失敗，請改用下載的 JSON'));
+}
+// 精靈目前不會從 JSON 帶入選單位置，先讓路徑一鍵複製、貼進「選單位置」
+function copyMenuPath(i) {
+  const m = ((window._cfgOut && window._cfgOut.menus) || [])[i] || {};
+  if (!m.folder) { showError('規格書沒寫選單路徑，請在上方路徑欄填入'); return; }
+  navigator.clipboard.writeText(m.folder).then(() => showToast('📋 已複製選單路徑：' + m.folder),
+    () => showError('複製失敗，請手動選取路徑複製'));
 }
 
 function downloadConfigJson() {
@@ -3832,7 +3849,7 @@ function downloadChecklist() {
     ...(o.skipped && o.skipped.length ? [`- 未納入的分頁（${o.skipped.length}）：${o.skipped.join('、')}`] : []),
     `- 本機驗證：${o.errors.length ? '❌ ' + o.errors.length + ' 項錯誤' : '✅ 通過'}`,
     '', '## 建立方式與選單位置', '',
-    '**建議用後台精靈建立**：到「新增自動化工具」→「貼上JSON快速填入」貼上該工具的 JSON（工具頁「📋 複製（貼到精靈）」，一次一支），',
+    '**建議用後台精靈建立**：到「新增自動化工具」→「貼上JSON快速填入」貼上該工具的 JSON（工具頁「📋 複製（貼到精靈）」，一次一支，工具名稱已帶在 JSON 裡），',
     '再照下表填「選單位置」與「工具名稱」。選單位置填資料夾路徑即可，存檔時系統逐段比對，已存在的沿用、不存在的自動建立，不需要節點編號。',
     '', '| 工具 | 精靈：選單位置（資料夾） | 精靈：工具名稱 | 匯入檔 MenuNo |', '|---|---|---|---|',
     ...o.items.map((it, i) => {
